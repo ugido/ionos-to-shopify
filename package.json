@@ -12,6 +12,7 @@
     "axios": "^1.4.0",
     "dotenv": "^16.0.3",
     "jsonfile": "^6.1.0",
+    "lodash": "^4.17.21",
     "puppeteer": "^20.2.0",
     "write-json-file": "^5.0.0"
   }

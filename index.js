@@ -6,7 +6,7 @@ const axios = require('axios');
 
 //import {writeJsonFile} from 'write-json-file';
 const jsonfile = require('jsonfile');
-
+var _ = require('lodash');
 
 //import puppeteer from 'puppeteer';
 //console.log(process.env.SHOP_URL);
@@ -308,7 +308,7 @@ async function setShopifyProductVariant(id, quantity){
         var variant = product.variants[0];
         console.log('variant.id: ', variant.id);
 
-        var updateResponse = await shopifyInstance.put(`/variants/${variant.id}.json`, {
+        var updateResponse = await shopifyInstance.put(`variants/${variant.id}.json`, {
             variant: {
                 id: variant.id,
                 price: '10.10',
@@ -343,7 +343,7 @@ async function getFirstLocationId(){
 
 async function setInventoryManagementValue(variant_id, inventory_management){
     //return 1;
-    var updateVariantResponse = await shopifyInstance.put(`/variants/${variant_id}.json`, {
+    var updateVariantResponse = await shopifyInstance.put(`variants/${variant_id}.json`, {
         variant: {
             id: variant_id,
             inventory_management: inventory_management,
@@ -391,7 +391,7 @@ async function setShopifyProductInventory(location_id, product_id, quantity){
             return 0;
         }
 
-        var inventoryLevelUpdateResponse = await shopifyInstance.post(`/inventory_levels/set.json`, {
+        var inventoryLevelUpdateResponse = await shopifyInstance.post(`inventory_levels/set.json`, {
             location_id: location_id,
             inventory_item_id: inventory_item_id,
             available: quantity,
@@ -415,7 +415,7 @@ async function setShopifyProductInventory(location_id, product_id, quantity){
     }
     
     /*
-    var inventoryLevelResponse = await shopifyInstance.get(`/inventory_levels.json`, {
+    var inventoryLevelResponse = await shopifyInstance.get(`inventory_levels.json`, {
         params: {
             inventory_item_ids: inventory_item_id
         }
@@ -432,7 +432,7 @@ async function setShopifyProductInventory(location_id, product_id, quantity){
 
 
     /*
-    var inventoryResponse = await shopifyInstance.get(`/inventory_items/${inventory_item_id}.json`);
+    var inventoryResponse = await shopifyInstance.get(`inventory_items/${inventory_item_id}.json`);
     if(inventoryResponse.status != 200){
         console.error('ERROR: setShopifyProductInventory: inventoryResponse: status= ', inventoryResponse.status);
         return 0;
@@ -444,7 +444,7 @@ async function setShopifyProductInventory(location_id, product_id, quantity){
     */
 
     /*
-    var updateResponse = await shopifyInstance.put(`/inventory_item/${inventory_item_id}.json`, {
+    var updateResponse = await shopifyInstance.put(`inventory_item/${inventory_item_id}.json`, {
         inventory_item: {
             id: inventory_item_id,
             tracked: false,
@@ -465,16 +465,160 @@ async function setShopifyProductInventory(location_id, product_id, quantity){
 }
 
 
+async function processProductFile(offset){
+
+    var file = `data/products.${offset}.json`;
+    var data = jsonfile.readFileSync(file);
+    var products = data.items;
+
+    console.log(products.length);
+
+    for(productIndex = 0; productIndex < products.length; productIndex++){
+        var product = products[productIndex];
+
+        await processIonosProduct(product);
+    }
+}
+
+async function processCategoryFiles(){
+
+    var categories = jsonfile.readFileSync(`data/categories.0.json`).items;
+    categories = categories.concat(jsonfile.readFileSync(`data/categories.100.json`).items);
+
+    //console.log(categories.length);
+    //console.log(categories[0]);return 0;
+    /*
+    var categoryNames = categories
+        .filter(category => !category.parentId)
+        .map(category => category.name);
+
+    console.log(categoryNames);
+    */
+    var category = categories[0];
+    var product_ids = [8388265476415, 8305756275007];
+
+    await createCategory(category, product_ids);
+
+    for(categoryIndex = 0; categoryIndex < categories.length; categoryIndex++){
+        var category = categories[categoryIndex];
+
+        await processIonosCategory(category);
+    }
+
+
+}
+
+
+async function processIonosCategory(category){
+
+}
+
+async function processIonosProduct(product){
+    productData.push({
+        id: product.id,
+        sku: product.sku,
+        options: product.options.length,
+        option_count: product.options.length === 1 ? product.options[0].choices.length : 0,
+        combinations: product.combinations.length,
+
+    });
+
+    var options = product.options;
+    var combinations = product.combinations;
+
+    /*
+    if(options.length === 0){
+        variations.push({
+            
+        })
+    }
+
+    })
+    */
+}
+
+
+function checkData(){
+    /*
+    var skuMap = {};
+
+    for(let { id, sku } of productData)
+        skuMap[sku] = { 
+            sku, 
+            id, 
+            count: skuMap[sku] ? skuMap[sku].count + 1 : 1
+        }      
+
+    let result = Object.values(skuMap).filter(item => item.count === 1);
+    */
+
+    
+    //let result = Object.values(skuMap).filter(options => item.options.length  1);
+    let optionCount = _.countBy(productData, 'options[0].choices');
+    let comboCount = _.countBy(productData, 'combinations');
+    let optionCombo = productData.filter(i => i.option_count !== i.combinations);
+    
+    jsonfile.writeFileSync(`data/products-combos.json`, optionCombo);
+
+    console.log('ckecked: ', productData.length, optionCombo.length);//productData.length, optionCount, comboCount, 
+}
+
+async function createCategory(category, product_ids){
+    
+    var products = product_ids.map(product_id => ({'product_id': product_id}));
+    //onsole.log(products);return 0;
+    var createResponse = await shopifyInstance.post(`custom_collections.json`, {
+        custom_collection: {
+            title: category.name,
+            body_html: category.description,
+            collects: products,
+            image: {src: category.originalImage.url}
+        }
+    });
+
+    if(createResponse.status != 201){
+        console.error('ERROR: createCategory createResponse status= ', createResponse.status, createResponse.data);
+        return 0;
+    }
+
+    var custom_collection = createResponse.data.custom_collection;
+    
+    console.log('createCategory createResponse id: ', custom_collection);
+}
+
+
+var productData = [];
+var variations = [];
+
 (async () => {
     
+    //await processCategoryFiles();
+
+    //var product_ids = [8388265476415, 8305756275007];
+    //await createCategory(category, product_ids);
+
+    /*
+    //INVENTORY UPDATING: unlimited exists and true -> quantity = null, else quantity ()
     var product_id = 8388265476415;
     var quantity = 2;
-
     var location_id = await getFirstLocationId();
-    //return 0;
     await setShopifyProductInventory(location_id, product_id, quantity);
-    //await getShopifyProduct(id);
+    */
+
+    //await getShopifyProduct(8388265476415);
     
+    /* */
+    //TEST: is product sku unique for all 492 products? YES
+    var offset = 0;
+    await processProductFile(0);
+    await processProductFile(100);
+    await processProductFile(200);
+    await processProductFile(300);
+    await processProductFile(400);
+    checkData();
+    return 0;
+    
+
 
     //await processEntity('categories');
     //await processEntity('products');
