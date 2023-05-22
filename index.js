@@ -485,29 +485,45 @@ async function processCategoryFiles(){
     var categories = jsonfile.readFileSync(`data/categories.0.json`).items;
     categories = categories.concat(jsonfile.readFileSync(`data/categories.100.json`).items);
 
+    var categoryMap = {}; 
     //console.log(categories.length);
     //console.log(categories[0]);return 0;
+    
     /*
     var categoryNames = categories
         .filter(category => !category.parentId)
         .map(category => category.name);
 
-    console.log(categoryNames);
+    console.log(categoryNames);return;
     */
+
+    /*
     var category = categories[0];
     var product_ids = [8388265476415, 8305756275007];
-
     await createCategory(category, product_ids);
+    */
+    var category = categories[0];
+    var product_ids = [8305756176703, 8388265476415, 8305756012863];
+   await updateCategory(category, product_ids);
+   return [];
 
     for(categoryIndex = 0; categoryIndex < categories.length; categoryIndex++){
         var category = categories[categoryIndex];
 
-        await processIonosCategory(category);
+        categoryMap[category.id] = getLastParentId(category, categories); 
+        //await processIonosCategory(category);
     }
 
+    return categoryMap;
 
 }
 
+function getLastParentId(category, categories){
+    if(!category.parentId) return category.id;
+    var parentId = category.parentId;
+    var parentCategory = categories.find(category => category.id === parentId);
+    return getLastParentId(parentCategory, categories);
+}
 
 async function processIonosCategory(category){
 
@@ -584,16 +600,90 @@ async function createCategory(category, product_ids){
     var custom_collection = createResponse.data.custom_collection;
     
     console.log('createCategory createResponse id: ', custom_collection);
+
+
+}
+
+
+async function updateCategory(category, product_ids){
+
+    var collection_id = getCollectionId(category.name);
+
+    for(var productIndex = 0; productIndex < product_ids.length; productIndex++){
+        var product_id = product_ids[productIndex];
+
+        var createResponse = await shopifyInstance.post(`collects.json`, {
+            collect: {
+                collection_id: collection_id,
+                product_id: product_id,
+            }
+        });
+
+        if(createResponse.status != 201){
+            console.error('ERROR: updateCategory createResponse status= ', createResponse.status, createResponse.data);
+            //return 0;
+        }
+        await sleep(3000);
+    }
+    
+
+
+
+    //var collect = createResponse.data.collect;
+    
+    //console.log('updateCategory createResponse id: ', collect);
+
+
+    /*
+    var products = product_ids.map(product_id => ({'product_id': product_id}));
+    var updateResponse = await shopifyInstance.get(`custom_collections/${collection_id}.json`, {
+        custom_collection: {
+            collects: products,
+        }
+    });
+
+    if(updateResponse.status != 200){
+        console.error('ERROR: updateCategory updateResponse status= ', createResponse.status, createResponse.data);
+        return 0;
+    }
+
+    var custom_collection = updateResponse.data.custom_collection;
+    
+    console.log('updateCategory updateResponse id: ', custom_collection);
+    */
+
+}
+
+
+function getCollectionId(title){
+    var collection = shopifyCategories.find(category => category.title === title);
+    return collection.id;
+}
+
+
+async function getShopifyCategories(){
+    var response = await shopifyInstance.get(`custom_collections.json?limit=250`);
+    if(response.status != 200){
+        console.error('ERROR: getProduct response.status= ', response.status);
+        return 0;
+    }
+
+    return response.data.custom_collections;
 }
 
 
 var productData = [];
 var variations = [];
+//var categories = []; 
+
+var shopifyCategories = [];
 
 (async () => {
     
-    //await processCategoryFiles();
-
+    shopifyCategories = await getShopifyCategories();
+    var categoryMap = await processCategoryFiles();
+    console.log(categoryMap);
+    return;
     //var product_ids = [8388265476415, 8305756275007];
     //await createCategory(category, product_ids);
 
