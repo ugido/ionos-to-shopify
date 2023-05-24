@@ -579,6 +579,7 @@ function checkData(){
     console.log('ckecked: ', productData.length, optionCombo.length);//productData.length, optionCount, comboCount, 
 }
 
+
 async function createCategory(category, product_ids){
     
     var products = product_ids.map(product_id => ({'product_id': product_id}));
