@@ -5,7 +5,7 @@ const puppeteer = require('puppeteer');
 const axios = require('axios');
 const jsonfile = require('jsonfile');
 var _ = require('lodash');
-
+var md5 = require('md5');
 
 var gambioInstance = axios.create({
     baseURL: process.env.GAMBIO_SHOP_URL,//+'/'+shop.php,
@@ -17,6 +17,7 @@ var gambioInstance = axios.create({
         return status >= 200 && status < 500; // default
     },
 });
+
 
 async function saveEntityPart(entity, offset, data){
     jsonfile.writeFileSync(`data/gambio/${entity}.${offset}.json`, data);
@@ -87,6 +88,12 @@ async function processPage(page, url){
 
 async function getProducts(page){
 
+    const pageTitle = await getElementText(page, 'h1');
+
+    if(pageTitle === 'Erweiterte Suche'){
+        return [];
+    }
+
     const rootSelector = '.productlist';
     const productSelector = '.product-container';
 
@@ -150,7 +157,7 @@ async function getProduct(page, productUrl){
     });
 
     await hideCookieElement(page);
-    await sleep(2000);
+    await sleep(1000);
 
     let modifierGroupCount = await getSelectorCount(page, '.modifiers-selection .modifier-group');
     //console.log('modifierGroupCount: ', modifierGroupCount);
@@ -211,7 +218,7 @@ async function getProduct(page, productUrl){
                     });
                 }
                 else {
-                    console.log(responseData.data);
+                    console.error('ERROR: getGambioShopData: success false for ', productUrl);
                     return false;
                 }
                 //variations.push(responseData.data);
@@ -237,7 +244,7 @@ async function getProduct(page, productUrl){
 
             var description = document.querySelector('.product-info-description .tab-body.active').innerHTML;
 
-            var modelNumber = document.querySelector('.model-number-text').innerText.trim();
+            var modelNumber = document.querySelector('.model-number-text')?  document.querySelector('.model-number-text').innerText.trim() : null;
 
             var oldPriceElement = document.querySelector('.price-container .productOldPrice');
             var oldPrice = oldPriceElement ? oldPriceElement.textContent.trim() : '';
@@ -251,7 +258,7 @@ async function getProduct(page, productUrl){
                 modelNumber: modelNumber,
                 images: images,
                 variations: variations,
-                description: description.length,
+                description: description,
                 price: price,
                 oldPrice: oldPrice,
             }
@@ -263,6 +270,7 @@ async function getProduct(page, productUrl){
     product.modifierLabel = modifierLabel;
     product.selectItems = selectItems;
     product.schemaData = null;
+    product.url = productUrl;
     
     const schemaElements = await page.$$('script[type="application/ld+json"]');
     if(schemaElements.length > 0){
@@ -272,7 +280,7 @@ async function getProduct(page, productUrl){
 
     if(schemaElements.length > 1){
         const schemaText = await page.evaluate(element => element.innerText, schemaElements[1]);
-        //product.schemaData = JSON.parse(schemaText);
+        product.schemaData = JSON.parse(schemaText);
     }
 
     return product;
@@ -296,7 +304,9 @@ async function processCategoryPage(page, categoryUrl){
     });
     */
 
-    await page.goto(categoryUrl, {
+    let urlSuffix = '?view_mode=tiled&listing_sort=&listing_count=192';
+
+    await page.goto(categoryUrl+urlSuffix, {
         waitUntil: 'networkidle2'
     });
 
@@ -390,6 +400,96 @@ async function processCategories(page){
 }
 
 
+async function processCategoryProducts(page, categories){
+
+    var categoryData = []; 
+
+    for(var mainCategoryIndex = 0; mainCategoryIndex < categories.length; mainCategoryIndex++){
+        var mainCategory = categories[mainCategoryIndex];
+
+        var categoryItem = await processCategoryPage(page, mainCategory.url);
+
+        var subLinks = mainCategory.subLinks;
+
+        categoryData.push({
+            label: mainCategory.text,
+            url: mainCategory.url,
+            //product_count: categoryItem.products.length,
+            products: subLinks.length > 0 ? [] : categoryItem.products,
+            images: categoryItem.images,
+            description: categoryItem.description,
+        });
+
+        if(subLinks.length > 0){
+            console.log('main category: ', mainCategory.text);
+            for(var subCategoryIndex = 0; subCategoryIndex < subLinks.length; subCategoryIndex++){
+                var subCategory = subLinks[subCategoryIndex];
+                //console.log('sub category: ', subCategory.text);
+                var categoryItem = await processCategoryPage(page, subCategory.url)
+                
+                categoryData.push({
+                    label: subCategory.text,
+                    url: subCategory.url,
+                    //product_count: categoryItem.products.length,
+                    products: categoryItem.products,
+                    images: categoryItem.images,
+                    description: categoryItem.description,
+                });
+
+                await sleep(1000);
+            }
+
+
+        }
+        else {
+            
+            //console.log('Main category: ', mainCategory.text);
+        }
+
+        
+        //categoryData.push(categoryItem);
+    }
+
+    /*
+    await page.goto(url, {
+        waitUntil: 'networkidle2'
+    });
+    */
+
+    return categoryData;
+}
+
+
+async function processCategoryData(page){
+
+    var offset = 0;
+    var file = `data/gambio/categoriesData.${offset}.json`;
+    var categoriesData = jsonfile.readFileSync(file);
+    var products = [];
+    //console.log('categoriesData length: ', categoriesData.length);
+
+    for(var i = 0; i<categoriesData.length; i++){
+        if(i< 50) continue;
+        
+
+        var categoryItem = categoriesData[i];
+        var products = categoryItem.products;
+
+        console.log('processCategoryData index: ', i, categoryItem.url);
+
+        for(var productIndex = 0; productIndex < products.length; productIndex++){
+            var product = products[productIndex];
+            var productUrl = product.url;
+            var productUrlHash = md5(productUrl);
+
+            var data = await getProduct(page, productUrl);
+            jsonfile.writeFileSync(`data/gambio/products/${productUrlHash}.json`, data);
+            console.log('processProduct index: ', productIndex, productUrl);
+            await sleep(2000);
+        }
+    }
+}
+
 
 (async () => {
     
@@ -403,21 +503,36 @@ async function processCategories(page){
 
     const page = await browser.newPage();
 
+    await processCategoryData(page);
+    
+    
+
     /*
+    var productUrl = process.env.GAMBIO_EXAMPLE_URL;
+    var product = await getProduct(page, productUrl);
+    console.log('product: ', product);// JSON.stringify(product.schemaData)
+    */
+    await browser.close();
+    
+
+   /*
     var categories = await processCategories(page);
     //console.log('categories: ', categories);
-    await saveEntityPart('categories', 0, categories);
+    //await saveEntityPart('categories', 0, categories);
+    var fullCategoryData = await processCategoryProducts(page, categories);
+    await saveEntityPart('categoriesData', 0, fullCategoryData);
     await browser.close();
     return;
-    */      
-
+    */
     
+
+    /*
     var categoryUrl = process.env.GAMBIO_EXAMPLE_CATEGORY;
     var categoryData = await processCategoryPage(page, categoryUrl);
     console.log(categoryData);   
     await browser.close();
     return;
-    
+    */
 
 
     /*
@@ -448,7 +563,7 @@ async function processCategories(page){
     console.log('results: ', results);
     */
 
-    
+
     //.productlist: .current-price-container, a.product-url
     //var selector = '.productlist .current-price-container';
     //await processPage();
