@@ -18,6 +18,16 @@ var gambioInstance = axios.create({
     },
 });
 
+var shopifyInstance = axios.create({
+    baseURL: process.env.SHOPIFY_API_URL,
+    timeout: 20000,
+    headers: {
+        'X-Shopify-Access-Token': process.env.SHOPIFY_API_TOKEN
+    },
+    validateStatus: function (status) {
+        return status >= 200 && status < 500; // default
+    },
+});
 
 async function saveEntityPart(entity, offset, data){
     jsonfile.writeFileSync(`data/gambio/${entity}.${offset}.json`, data);
@@ -215,6 +225,7 @@ async function getProduct(page, productUrl){
                     variations.push({
                         price: content.price.value,
                         model: content.model.value,
+                        option1: selectItem.label,
                     });
                 }
                 else {
@@ -469,7 +480,7 @@ async function processCategoryData(page){
     //console.log('categoriesData length: ', categoriesData.length);
 
     for(var i = 0; i<categoriesData.length; i++){
-        if(i< 50) continue;
+        if(i> 3) break;
         
 
         var categoryItem = categoriesData[i];
@@ -491,6 +502,70 @@ async function processCategoryData(page){
 }
 
 
+async function mapProduct(page, productUrl){
+
+    var productUrlHash = md5(productUrl);
+    var productFile = `data/gambio/products/${productUrlHash}.json`;
+    var productData = jsonfile.readFileSync(productFile);
+    var images = productData.images.map(src => ({src: src}));
+    var variants = [];  
+
+    var product = {
+        title: productData.title,
+        body_html: productData.description,
+        images: images,
+        variants: variants,
+    };
+
+    if(productData.modifierGroupCount === 0){
+
+        var price = productData.price.replace(' EUR', '').replace(',', '.');
+
+        variants.push({
+            price: price,
+            sku: productData.modelNumber,
+        });
+    }
+    else if(productData.modifierGroupCount === 1){
+        variants = productData.variations.map(variation => {
+            var price = variation.price.replace(' EUR', '').replace(',', '.');
+            return {
+                price: price,
+                sku: variation.model,
+                option1: variation.option1,
+            }
+        });
+
+        var values = variants.map(variant => variant.option1);
+        product.options = [{name: productData.modifierLabel, values: values}];
+    }
+    else {
+
+    }
+
+    product.variants = variants;
+
+    return product;
+}
+
+
+async function createProduct(page, productItem){
+
+    var createResponse = await shopifyInstance.post(`products.json`, {
+        product: productItem
+    });
+
+    if(createResponse.status != 201){
+        console.error('ERROR: createCategory createResponse status= ', createResponse.status, createResponse.data);
+        return 0;
+    }
+
+    var product = createResponse.data.product;
+    
+    //console.log('createProduct createResponse id: ', product);
+    return product;
+}
+
 (async () => {
     
     const browser = await puppeteer.launch({
@@ -503,9 +578,14 @@ async function processCategoryData(page){
 
     const page = await browser.newPage();
 
-    await processCategoryData(page);
+    //await processCategoryData(page);
     
-    
+    /**/
+    var productUrl = process.env.GAMBIO_EXAMPLE_URL;
+    var productItem = await mapProduct(page, productUrl);
+    var product = await createProduct(page, productItem);
+    console.log('product: ', productItem);// JSON.stringify(product.schemaData)
+    //product.id -> put in array, at the end: set category product_ids ? or after every product?
 
     /*
     var productUrl = process.env.GAMBIO_EXAMPLE_URL;
